@@ -59,7 +59,8 @@
     -webkit-text-stroke: 1.5px #0b1a3d; text-shadow: 0 3px 0 #0b1a3d; font-variant-numeric: tabular-nums;
   }
   .lives-panel { padding: 3px 8px; }
-  #lives { font-size: 16px; line-height: 1.15; max-width: 186px; text-align: right; }
+  #lives { font-size: 22px; line-height: 1.15; text-align: right; letter-spacing: 2px; }
+  #life-next { font: 12px 'Lilita One'; text-align: right; color: #ffd21f; -webkit-text-stroke: .6px #0b1a3d; }
   #lives .lost { filter: grayscale(1) brightness(.5); opacity: .55; }
   #lives .more { font-family: 'Lilita One'; font-size: 15px; color: #fff; -webkit-text-stroke: 1px #0b1a3d; }
   #lives.bump { animation: bump .35s; }
@@ -221,7 +222,8 @@
   @media (max-width: 600px) {
     #score { font-size: 24px; min-width: 70px; }
     .mult { font-size: 14px; line-height: 20px; }
-    #lives { font-size: 12.5px; max-width: 118px; }
+    #lives { font-size: 18px; }
+    #life-next { font-size: 11px; }
     #speed { font-size: 12px; }
     .ibtn { width: 38px; height: 38px; font-size: 14px; }
     #fuzz { width: 110px; }
@@ -256,7 +258,7 @@
   </div>
   <div class="hud-right">
     <div class="panel score-panel"><span id="mult" class="mult">x1</span><span id="score">0</span></div>
-    <div class="panel lives-panel"><div id="lives"></div></div>
+    <div class="panel lives-panel"><div id="lives"></div><div id="life-next"></div></div>
     <div id="speed">VITESSE x1.00</div>
     <div id="effects"></div>
   </div>
@@ -278,6 +280,7 @@
     <div class="touch-help">👆 Glisse ← → pour changer de voie · glisse ↑ ou tape pour sauter · glisse ↓ pour retomber</div>
   </div>
   <div class="legend">
+    <div><b>❤️</b>1 vie au départ<br>+1 toutes les 30 s · max 3</div>
     <div><b>🗄️</b>Baies hautes<br>change de voie ou monte par la rampe</div>
     <div><b>🖥️</b>Baies, onduleurs, tourets<br>−1 ❤️ · saute par-dessus</div>
     <div><b>👔</b>Chef Admin Réseau<br>−1 ❤️ · il fonce sur toi</div>
@@ -367,7 +370,7 @@ window.__ddzReady = true;
    CONFIGURATION
    ===================================================================== */
 const LANES = [-3.2, 0, 3.2];
-const GAME_VERSION = '2.2';   // affichée en petit sur le menu (à mettre à jour à chaque version)
+const GAME_VERSION = '2.3';   // affichée en petit sur le menu (à mettre à jour à chaque version)
 const CFG = {
   baseSpeed: 15,        // unités / seconde à x1
   accel: 0.0085,        // gain de multiplicateur par seconde de course
@@ -375,7 +378,7 @@ const CFG = {
   jumpH: 3.0, gravity: 46,
   laneLerp: 16,
   spawnZ: -150, despawnZ: 14,
-  startLives: 10, maxLives: 15,
+  startLives: 1, maxLives: 3, lifeEvery: 30,   // 1 vie au départ, +1 toutes les 30 s, 3 au maximum
   fuzzThreshold: 60, fuzzDecay: 2.4,
   turboTime: 5, turboMul: 1.45,
   girlEvery: [20, 30],
@@ -2198,7 +2201,7 @@ function updateParticles(dt, worldD) {
    PROGRESSION : cagnotte de points, inventaire, skins et décors achetés
    ===================================================================== */
 const ITEMS = {
-  life:   { name: 'Vie en plus',  icon: '❤️', desc: '+1 ❤️ quand tu l\'actives', price: 400 },
+  life:   { name: 'Vie en plus',  icon: '❤️', desc: '+1 ❤️ quand tu l\'actives (max 3)', price: 400 },
   x2:     { name: 'Points x2',    icon: '✖️2', desc: 'Score doublé pendant 30 s', price: 300 },
   shield: { name: 'Bouclier',     icon: '🛡️', desc: 'Invincible 15 s, tu dégommes tout', price: 500 },
   magnet: { name: 'Aimant',       icon: '🧲', desc: 'Attire les bonus pendant 20 s', price: 250 },
@@ -2263,7 +2266,7 @@ const G = {
   state: 'menu', time: 0, runTime: 0, score: 0, lives: CFG.startLives, fuzz: 0, high: false,
   speedMul: 1, curMul: 1, maxMul: 1, speed: 0, dist: 0, nextRow: 0, girlTimer: 20, portalTimer: 50, lastGift: -99,
   invuln: 0, turbo: 0, shake: 0, resume: 1, dying: 0,
-  x2: 0, shield: 0, magnet: 0, neon: 0, neonAmt: 0, leaves: 0, alc: 0,
+  x2: 0, shield: 0, magnet: 0, neon: 0, neonAmt: 0, leaves: 0, alc: 0, lifeTimer: 0,
   items: 0, girls: 0, cops: 0, best: Save.get(), tripAmt: 0,
 };
 const P = { x: 0, lane: 1, y: 0, vy: 0, air: false, jumpBuf: 0, hum: null };
@@ -2341,7 +2344,7 @@ function groundAt(x, y, step) {
 const hud = { score: $('score'), mult: $('mult'), speed: $('speed'), lives: $('lives'), fuzzFill: $('fuzz-fill'), fuzzPct: $('fuzz-pct'), right: $('hud-right'), leaves: $('leafc'), fx: $('effects'), inv: $('inv') };
 let lastHud = {};
 function renderLives() {
-  const n = G.lives, shown = Math.max(CFG.startLives, n);
+  const n = G.lives, shown = CFG.maxLives;
   let html = '';
   for (let i = 0; i < Math.min(shown, 10); i++) html += i < n ? '❤️' : '<span class="lost">❤️</span>';
   if (n > 10) html += `<span class="more"> +${n - 10}</span>`;
@@ -2369,6 +2372,8 @@ function updateHud() {
   if (f !== lastHud.f) { hud.fuzzFill.style.width = f + '%'; hud.fuzzPct.textContent = f + '%'; lastHud.f = f; }
   if (G.leaves !== lastHud.lv) { hud.leaves.textContent = `🌿 ${G.leaves}/10`; lastHud.lv = G.leaves; }
   if (G.lives !== lastHud.l) { renderLives(); lastHud.l = G.lives; }
+  const ln = G.lives < CFG.maxLives ? `+❤️ dans ${Math.ceil(CFG.lifeEvery - G.lifeTimer)} s` : 'MAX';
+  if (ln !== lastHud.ln) { $('life-next').textContent = ln; lastHud.ln = ln; }
   // Effets actifs (mis à jour au plus 4 fois par seconde)
   const fxs = [['x2', '✖️2'], ['shield', '🛡️'], ['magnet', '🧲'], ['neon', '💡']].filter(([k]) => G[k] > 0).map(([k, ic]) => `${ic} ${Math.ceil(G[k])}s`).join(' · ');
   if (fxs !== lastHud.fx) { hud.fx.textContent = fxs; lastHud.fx = fxs; }
@@ -2553,6 +2558,7 @@ function knock(e) { // turbo ou bouclier : on dégage tout sur son passage
 // Bonus d'inventaire utilisés pendant la course
 function useItem(k) {
   if (G.state !== 'run' || G.dying || !(Prog.inv[k] > 0)) return;
+  if (k === 'life' && G.lives >= CFG.maxLives) { banner('❤️ Déjà au maximum (3 vies)', '', 1.2); return; }
   Prog.inv[k]--; saveProg(); renderInv();
   if (k === 'life') { G.lives = Math.min(CFG.maxLives, G.lives + 1); popup('+1 ❤️', P.x, P.y + 2.4, 0, '#ff5fc8'); }
   if (k === 'x2') G.x2 = 30;
@@ -2700,7 +2706,7 @@ function resetRun() {
   clearEntities();
   Object.assign(G, { runTime: 0, score: 0, lives: CFG.startLives, fuzz: 0, high: false, speedMul: 1, curMul: 1, maxMul: 1, dist: 0,
     invuln: 0, turbo: 0, shake: 0, resume: 1, dying: 0, items: 0, girls: 0, cops: 0, girlTimer: rand(14, 20),
-    portalTimer: rand(40, 55), lastGift: -99, alc: 0, x2: 0, shield: 0, magnet: 0, neon: 0, leaves: 0 });
+    portalTimer: rand(40, 55), lastGift: -99, alc: 0, lifeTimer: 0, x2: 0, shield: 0, magnet: 0, neon: 0, leaves: 0 });
   Object.assign(P, { x: 0, lane: 1, y: 0, vy: 0, air: false, jumpBuf: 0 });
   P.hum.root.rotation.set(0, 0, 0); P.hum.root.position.set(0, 0, 0); P.hum.root.visible = true;
   lastHud = {};
@@ -2831,6 +2837,11 @@ function updateRun(dt) {
   for (const k of ['turbo', 'x2', 'shield', 'magnet', 'neon']) if (G[k] > 0) G[k] = Math.max(0, G[k] - dt);
   G.invuln -= dt;
   G.girlTimer -= dt; G.portalTimer -= dt;
+  // Une vie de plus toutes les 30 s tant qu'on n'est pas au maximum (le compteur repart à chaque vie gagnée)
+  if (G.lives < CFG.maxLives && !G.dying) {
+    G.lifeTimer += dt;
+    if (G.lifeTimer >= CFG.lifeEvery) { G.lifeTimer = 0; G.lives++; popup('+1 ❤️', P.x, P.y + 2.4, 0, '#ff5fc8'); Snd.play('item'); }
+  } else G.lifeTimer = 0;
   const f0 = G.fuzz; G.fuzz = Math.max(0, G.fuzz - CFG.fuzzDecay * dt);
   G.alc = f0 > 0 ? G.alc * (G.fuzz / f0) : 0;   // les deux parts redescendent ensemble
   if (G.high && G.fuzz < CFG.fuzzThreshold) setHigh(false);

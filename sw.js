@@ -2,7 +2,7 @@
 // La page passe d'abord par le réseau (nouvelles versions dès qu'on est connecté) et retombe sur
 // la copie en cache hors ligne ; le moteur 3D, les polices et les icônes sont servis depuis le cache.
 // CACHE est réécrit par publish.sh avec la version du jeu : une nouvelle version vide l'ancien cache.
-const CACHE = 'ddz-runner-2.2';
+const CACHE = 'ddz-runner-2.3';
 const FILES = [
   './', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png',
   './fonts/fonts.css', './fonts/LilitaOne.ttf', './fonts/Rajdhani-600.ttf', './fonts/Rajdhani-700.ttf',

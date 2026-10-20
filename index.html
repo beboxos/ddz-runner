@@ -157,6 +157,7 @@
   @keyframes goodflash { 50% { box-shadow: 0 0 30px var(--green); border-color: var(--green); } }
   @keyframes shake { 20% { transform: translateX(-8px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
   .mini-tries { margin-top: 10px; font-size: 15px; }
+  .mini-mod { font-size: 14px; font-weight: 700; min-height: 18px; margin: -4px 0 8px; color: #ffe14d; }
   .mini-msg { font-family: 'Lilita One'; font-size: 24px; min-height: 30px; margin-top: 6px; -webkit-text-stroke: 1px #5a0038; text-shadow: 0 2px 0 #5a0038; }
   .mini-tap { margin-top: 6px; font-size: 13px; opacity: .6; }
 
@@ -283,7 +284,7 @@
     <div><b>🌿🍺</b>200 / 100 pts · 60 % de jauge : ×2<br>10 🌿 = boost néon ×3</div>
     <div><b>🌀</b>Téléporteurs<br>changent le décor</div>
     <div><b>🚔</b>Police (si défoncé)<br>−2 ❤️ · retrait de permis</div>
-    <div><b>💃</b>Séduction : 5 réussites<br>+2 ❤️ · +500 · turbo</div>
+    <div><b>💃</b>Séduction : 5 réussites<br>+2 ❤️ · +500 · turbo · 🌿 aide, 🍺 complique</div>
   </div>
 </div>
 
@@ -326,6 +327,7 @@
   <div class="mini-card">
     <div class="mini-title">💘 MODE SÉDUCTION</div>
     <div class="mini-sub">Tape (ou <kbd>Espace</kbd>) quand le curseur est dans la zone rose</div>
+    <div class="mini-mod" id="mini-mod"></div>
     <div class="mini-steps" id="mini-steps"></div>
     <div class="mini-bar" id="mini-bar"><div id="mini-zone"></div><div id="mini-cursor"></div></div>
     <div class="mini-tries" id="mini-tries"></div>
@@ -365,7 +367,7 @@ window.__ddzReady = true;
    CONFIGURATION
    ===================================================================== */
 const LANES = [-3.2, 0, 3.2];
-const GAME_VERSION = '2.0';   // affichée en petit sur le menu (à mettre à jour à chaque version)
+const GAME_VERSION = '2.2';   // affichée en petit sur le menu (à mettre à jour à chaque version)
 const CFG = {
   baseSpeed: 15,        // unités / seconde à x1
   accel: 0.0085,        // gain de multiplicateur par seconde de course
@@ -418,7 +420,7 @@ const Save = {
    AUDIO — musique synthwave générée en temps réel + effets sonores
    ===================================================================== */
 const Snd = {
-  ctx: null, muted: false, playing: false, bpm: 122, step: 0, nextT: 0, trip: 0,
+  ctx: null, muted: false, playing: false, bpm: 128, dropped: false, step: 0, nextT: 0, trip: 0,
   init() {
     if (this.ctx) { this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -430,8 +432,9 @@ const Snd = {
     this.mfilter = c.createBiquadFilter(); this.mfilter.type = 'lowpass'; this.mfilter.frequency.value = 18000; this.mfilter.Q.value = 2;
     this.music = c.createGain(); this.music.gain.value = 0.5;
     this.music.connect(this.mfilter).connect(this.master);
+    this.pump = c.createGain(); this.pump.connect(this.music);   // bus « pompé » par le kick
     this.sfx = c.createGain(); this.sfx.gain.value = 0.85; this.sfx.connect(this.master);
-    // Écho pour l'arpège
+    // Écho pour le lead et les stabs
     this.delay = c.createDelay(1); this.delay.delayTime.value = 0.37;
     const fb = c.createGain(); fb.gain.value = 0.38;
     const wet = c.createGain(); wet.gain.value = 0.4;
@@ -447,17 +450,16 @@ const Snd = {
     this.muted = m;
     if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.05);
   },
-  start() { if (!this.ctx) return; this.playing = true; this.step = 0; this.nextT = this.ctx.currentTime + 0.06; this.duck(false); },
+  start() { if (!this.ctx) return; this.playing = true; this.step = 0; this.dropped = false; this.nextT = this.ctx.currentTime + 0.06; this.duck(false); },
   stop() { this.playing = false; },
   duck(on) { if (this.music) this.music.gain.setTargetAtTime(on ? 0.18 : 0.5, this.ctx.currentTime, 0.2); },
-  // Accords : Am – F – C – G (racine basse + notes d'arpège)
-  CH: [
-    { r: 55.0, n: [220.0, 261.63, 329.63, 440.0] },
-    { r: 43.65, n: [174.61, 220.0, 261.63, 349.23] },
-    { r: 65.41, n: [261.63, 329.63, 392.0, 523.25] },
-    { r: 49.0, n: [196.0, 246.94, 293.66, 392.0] },
-  ],
-  ARP: [0, 1, 2, 3, 2, 1, 0, 2, 1, 2, 3, 2, 1, 3, 2, 1],
+  // Techno : boucle de 16 mesures — intro (kick, basse roulante) → ligne acid → stabs → lead →
+  // roulement et montée → break sans kick → drop. Le kick fait « pomper » le reste (sidechain).
+  ROOTS: [55.0, 55.0, 43.65, 49.0],                     // la, la, fa, sol (une racine toutes les 4 mesures)
+  ACID: [0, 0, 12, 0, 3, 0, 7, 10, 0, 12, 0, 5, 3, 0, 15, 7],
+  ACID_ON: [1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1],
+  ACID_ACC: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+  LEAD: [880, 1046.5, 1318.5, 1046.5, 880, 1174.66, 1318.5, 1567.98],
   tick() {
     if (!this.playing || !this.ctx) return;
     const c = this.ctx;
@@ -468,21 +470,26 @@ const Snd = {
     while (this.nextT < t + 0.12) {
       this.playStep(this.step, this.nextT);
       this.nextT += 60 / this.bpm / 4;
-      this.step = (this.step + 1) % 64;
+      this.step = (this.step + 1) % 256;
     }
   },
   playStep(s, t) {
-    const st = s % 16, ch = this.CH[(s >> 4) % 4], beat = 60 / this.bpm;
-    if (st === 0) this.delay.delayTime.setValueAtTime(beat * 0.75, t);
-    if (st % 4 === 0) this.kick(t);
-    if (st === 4 || st === 12) this.clap(t);
-    if (st % 2 === 1) this.hat(t, st % 4 === 2 ? 0.09 : 0.05);
-    if (st % 4 === 2) this.hat(t, 0.1, true);
-    // Basse sawtooth en croches, octave sur les contretemps
-    if (st % 2 === 0) this.bass(t, ch.r * (st % 8 === 6 ? 2 : 1), beat * 0.45);
-    // Arpège en doubles croches
-    this.arp(t, ch.n[this.ARP[st]] * (s % 32 >= 16 && st > 7 ? 2 : 1), beat * 0.22);
-    if (st === 0) this.pad(t, ch.n, beat * 4);
+    const st = s % 16, bar = s >> 4, beat = 60 / this.bpm, root = this.ROOTS[bar >> 2], brk = bar === 15;
+    if (st === 0) {
+      this.delay.delayTime.setValueAtTime(beat * 0.75, t);
+      if (bar === 0 && s === 0 && this.dropped) this.crash(t);
+      if (brk) { this.riser(t, beat * 4); this.dropped = true; }
+    }
+    if (!brk && st % 4 === 0) this.kick(t);
+    if (st % 2 === 1) this.hat(t, 0.035);
+    if (st % 4 === 2) this.hat(t, brk ? 0.05 : 0.1, true);
+    if (bar >= 2 && !brk && (st === 4 || st === 12)) this.clap(t);
+    if (!brk && st % 4 !== 0) this.bass(t, root, beat * 0.2);                       // basse roulante
+    if (bar >= 4 && !brk && this.ACID_ON[st]) this.acid(t, root * 2 * Math.pow(2, this.ACID[st] / 12), beat * 0.24, this.ACID_ACC[st]);
+    if (bar >= 8 && !brk && (st === 3 || st === 6 || st === 11)) this.stab(t, root, beat * 0.45);
+    if (bar >= 12 && !brk && st % 2 === 0) this.arp(t, this.LEAD[(st / 2 + bar) % 8], beat * 0.25);
+    if (bar === 14 && st >= 8 && st % 2 === 0) this.snare(t, 0.1);                 // roulement
+    if (brk) this.snare(t, 0.1 + 0.4 * st / 16);
   },
   env(g, t, a, peak, dur) {
     g.gain.setValueAtTime(0.0001, t);
@@ -491,9 +498,12 @@ const Snd = {
   },
   kick(t) {
     const c = this.ctx, o = c.createOscillator(), g = c.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
-    this.env(g, t, 0.003, 0.95, 0.32);
-    o.connect(g).connect(this.music); o.start(t); o.stop(t + 0.35);
+    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.11);
+    this.env(g, t, 0.003, 1.0, 0.3);
+    o.connect(g).connect(this.music); o.start(t); o.stop(t + 0.33);
+    this.noiseHit(t, 'highpass', 2500, 0.22, 0.015);                                  // attaque
+    const p = this.pump.gain;                                                          // sidechain
+    p.cancelScheduledValues(t); p.setValueAtTime(0.3, t); p.linearRampToValueAtTime(1, t + 60 / this.bpm * 0.45);
   },
   noiseHit(t, type, freq, vol, dur, out) {
     const c = this.ctx, src = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
@@ -502,33 +512,51 @@ const Snd = {
     src.connect(fl).connect(g).connect(out || this.music);
     src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.02);
   },
-  hat(t, vol, open) { this.noiseHit(t, 'highpass', 8000, vol, open ? 0.12 : 0.04); },
-  clap(t) { this.noiseHit(t, 'bandpass', 1600, 0.35, 0.16); },
+  hat(t, vol, open) { this.noiseHit(t, 'highpass', 8000, vol, open ? 0.11 : 0.035); },
+  clap(t) { this.noiseHit(t, 'bandpass', 1500, 0.32, 0.14); this.noiseHit(t + 0.012, 'bandpass', 1700, 0.22, 0.18); },
+  snare(t, vol) { this.noiseHit(t, 'bandpass', 1900, vol, 0.1); },
+  crash(t) { this.noiseHit(t, 'highpass', 5000, 0.2, 1.3); },
+  riser(t, dur) {
+    const c = this.ctx, src = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = this.noise; src.loop = true; fl.type = 'highpass';
+    fl.frequency.setValueAtTime(400, t); fl.frequency.exponentialRampToValueAtTime(9000, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + dur * 0.95); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(fl).connect(g).connect(this.music); src.start(t); src.stop(t + dur + 0.05);
+  },
   bass(t, f, dur) {
     const c = this.ctx, o = c.createOscillator(), fl = c.createBiquadFilter(), g = c.createGain();
     o.type = 'sawtooth'; o.frequency.value = f;
-    fl.type = 'lowpass'; fl.Q.value = 6;
-    fl.frequency.setValueAtTime(900, t); fl.frequency.exponentialRampToValueAtTime(160, t + dur);
-    this.env(g, t, 0.005, 0.32, dur);
-    o.connect(fl).connect(g).connect(this.music); o.start(t); o.stop(t + dur + 0.02);
+    fl.type = 'lowpass'; fl.frequency.value = 380; fl.Q.value = 3;
+    this.env(g, t, 0.004, 0.32, dur);
+    o.connect(fl).connect(g).connect(this.pump); o.start(t); o.stop(t + dur + 0.02);
+  },
+  acid(t, f, dur, accent) { // ligne façon 303 : filtre résonant qui « couine »
+    const c = this.ctx, o = c.createOscillator(), fl = c.createBiquadFilter(), g = c.createGain();
+    o.type = 'sawtooth'; o.frequency.value = f;
+    if (this.trip > 0.01) o.detune.value = Math.sin(t * 7) * 50 * this.trip;
+    fl.type = 'lowpass'; fl.Q.value = 15;
+    const cut = (500 + 2200 * (0.5 + 0.5 * Math.sin(t * 0.35))) * (accent ? 1.8 : 1);
+    fl.frequency.setValueAtTime(cut, t); fl.frequency.exponentialRampToValueAtTime(180, t + dur);
+    this.env(g, t, 0.004, accent ? 0.13 : 0.08, dur);
+    o.connect(fl).connect(g).connect(this.pump); o.start(t); o.stop(t + dur + 0.02);
+  },
+  stab(t, root, dur) { // accord mineur court, envoyé dans l'écho
+    const c = this.ctx, fl = c.createBiquadFilter(), g = c.createGain();
+    fl.type = 'bandpass'; fl.frequency.value = 1400; fl.Q.value = 0.8;
+    this.env(g, t, 0.005, 0.07, dur);
+    fl.connect(g); g.connect(this.pump); g.connect(this.delay);
+    for (const r of [1, 1.1892, 1.4983]) for (const det of [-12, 12]) {
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = root * 4 * r; o.detune.value = det;
+      o.connect(fl); o.start(t); o.stop(t + dur + 0.03);
+    }
   },
   arp(t, f, dur) {
     const c = this.ctx, o = c.createOscillator(), g = c.createGain();
     o.type = 'square'; o.frequency.value = f;
     if (this.trip > 0.01) o.detune.value = Math.sin(t * 7) * 60 * this.trip;
-    this.env(g, t, 0.004, 0.05, dur);
-    o.connect(g); g.connect(this.music); g.connect(this.delay);
+    this.env(g, t, 0.004, 0.04, dur);
+    o.connect(g); g.connect(this.pump); g.connect(this.delay);
     o.start(t); o.stop(t + dur + 0.02);
-  },
-  pad(t, notes, dur) {
-    const c = this.ctx, fl = c.createBiquadFilter(), g = c.createGain();
-    fl.type = 'lowpass'; fl.frequency.value = 1100;
-    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.035, t + dur * 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-    fl.connect(g).connect(this.music);
-    for (const n of notes.slice(0, 3)) for (const det of [-9, 9]) {
-      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = n / 2; o.detune.value = det;
-      o.connect(fl); o.start(t); o.stop(t + dur + 0.05);
-    }
   },
   // ---------- SFX ----------
   tone(type, f0, f1, dur, vol, delay = 0) {
@@ -1501,10 +1529,10 @@ function animWalk(h) {
 // ---------- Le héros et ses skins (vu surtout de dos : le dos est soigné) ----------
 const SKINS = {
   tech:   { name: 'Technicien IT',     icon: '🧑‍💻', price: 0 },
-  cop:    { name: 'Policier',          icon: '👮', price: 12000 },
-  boxers: { name: 'Caleçon à cœurs',   icon: '🩲', price: 18000 },
-  dj:     { name: 'DJ',                icon: '🎧', price: 25000 },
-  hacker: { name: 'Hacker',            icon: '🕶️', price: 35000 },
+  cop:    { name: 'Policier',          icon: '👮', price: 3000 },
+  boxers: { name: 'Caleçon à cœurs',   icon: '🩲', price: 5000 },
+  dj:     { name: 'DJ',                icon: '🎧', price: 8000 },
+  hacker: { name: 'Hacker',            icon: '🕶️', price: 12000 },
 };
 function makePlayer(skin = 'tech') {
   const black = std(0x14161c), skinC = std(pick([0xe3ae80]));
@@ -1872,23 +1900,24 @@ function makeCart() {
 }
 // Train de baies hautes : impossible à sauter d'un coup, mais on peut courir sur le toit
 function blockMaker(L) {
-  return () => {
+  return th => {
+    const st = BLOCK_STYLE[th], face = blockFace(th);
     const g = new THREE.Group(), H = 3.6, W = 2.6; // plus haut que le saut (3 m) : il faut la rampe
-    mesh(boxG(W, H, L), std(0x2a3550), 0, H / 2, 0, g);
-    mesh(boxG(W + 0.06, 0.1, L + 0.06), std(0x9aa3b5), 0, H + 0.05, 0, g);                 // toit métal
-    mesh(boxG(W + 0.08, 0.14, 0.14), std(0xffc21a), 0, H + 0.05, L / 2, g);                // nez jaune
-    const front = new THREE.Mesh(geo('blockFront', () => new THREE.PlaneGeometry(W, H)), BLOCK_FRONT());
+    mesh(boxG(W, H, L), std(st.body), 0, H / 2, 0, g);
+    mesh(boxG(W + 0.06, 0.1, L + 0.06), std(st.roof), 0, H + 0.05, 0, g);                   // toit
+    mesh(boxG(W + 0.08, 0.14, 0.14), std(st.nose), 0, H + 0.05, L / 2, g);                  // nez
+    const front = new THREE.Mesh(geo('blockFront', () => new THREE.PlaneGeometry(W, H)), face);
     front.position.set(0, H / 2, L / 2 + 0.01); g.add(front);
-    const sideGeo = geo('blockSide' + L, () => {
+    const sideGeo = geo('blockSide' + L + '_' + st.rep, () => {
       const pg = new THREE.PlaneGeometry(L, H), uv = pg.attributes.uv;
-      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * L / 3.86);
+      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * L / st.rep);
       return pg;
     });
     for (const sx of [-1, 1]) {
-      const s = new THREE.Mesh(sideGeo, BLOCK_FRONT());
+      const s = new THREE.Mesh(sideGeo, face);
       s.position.set(sx * (W / 2 + 0.01), H / 2, 0); s.rotation.y = sx * HALF_PI; g.add(s);
     }
-    for (const sx of [-1, 1]) mesh(boxG(0.08, 0.08, L), emis(sx < 0 ? 0x00e5ff : 0xff2bd6, 2.6), sx * (W / 2 + 0.03), H - 0.12, 0, g, false);
+    if (st.neon) for (const sx of [-1, 1]) mesh(boxG(0.08, 0.08, L), emis(st.neon[sx < 0 ? 0 : 1], 2.6), sx * (W / 2 + 0.03), H - 0.12, 0, g, false);
     bake(g, [g]);
     return { root: g, hw: 1.3, hd: L / 2, h: H, surf: true };
   };
@@ -1902,8 +1931,8 @@ function BLOCK_FRONT() {
   return _blockFront;
 }
 // Rampe jaune pour monter sur les baies hautes
-function makeRamp() {
-  const L = 6, H = 3.6, W = 2.5;
+function makeRamp(th = 'dc') {
+  const L = 6, H = 3.6, W = 2.5, [main, railC] = RAMP_STYLE[th];
   const rampGeo = geo('ramp', () => {
     const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(L, 0); s.lineTo(L, H); s.lineTo(0, 0);
     const g = new THREE.ExtrudeGeometry(s, { depth: W, bevelEnabled: false });
@@ -1911,13 +1940,189 @@ function makeRamp() {
     return g;
   });
   const g = new THREE.Group();
-  mesh(rampGeo, std(0xffc21a), 0, 0, 0, g);
+  mesh(rampGeo, std(main), 0, 0, 0, g);
   const ang = Math.atan2(H, L), len = Math.hypot(H, L);
-  for (const sx of [-1, 1]) { const rail = mesh(boxG(0.14, 0.14, len), std(0x1d2740), sx * (W / 2 - 0.07), H / 2 + 0.06, 0, g); rail.rotation.x = ang; }
-  for (let i = 1; i < 6; i++) { const t = i / 6, bar = mesh(boxG(W - 0.3, 0.05, 0.12), std(0x1d2740), 0, H * t + 0.03, L / 2 - L * t, g, false); bar.rotation.x = ang; }
+  for (const sx of [-1, 1]) { const rail = mesh(boxG(0.14, 0.14, len), std(railC), sx * (W / 2 - 0.07), H / 2 + 0.06, 0, g); rail.rotation.x = ang; }
+  for (let i = 1; i < 6; i++) { const t = i / 6, bar = mesh(boxG(W - 0.3, 0.05, 0.12), std(railC), 0, H * t + 0.03, L / 2 - L * t, g, false); bar.rotation.x = ang; }
   bake(g, [g]);
   return { root: g, hw: 1.25, hd: L / 2, h: H, surf: true, ramp: true };
 }
+// ---------- Obstacles adaptés à chaque décor ----------
+// Chaque type garde les mêmes dimensions de collision quel que soit le décor (difficulté identique) :
+// server = large 1,6 m · ups = bas 1,0 m · spool = moyen 1,4 m · cart = roule vers le joueur · block = 3,6 m · ramp.
+const ball = (r, cols, parent, y) => { // ballon en quartiers colorés (pivot qui roule)
+  const piv = new THREE.Group(); piv.position.y = y; parent.add(piv);
+  cols.forEach((c, i) => mesh(geo(`ballQ${r}_${cols.length}_${i}`, () => new THREE.SphereGeometry(r, 3, 10, i * Math.PI * 2 / cols.length, Math.PI * 2 / cols.length)), std(c), 0, 0, 0, piv));
+  return piv;
+};
+// Love Room
+function makeHeartPouf() {
+  const g = new THREE.Group();
+  const hg = geo('heartPouf', () => new THREE.ExtrudeGeometry(heartShape(0.85), { depth: 0.9, bevelEnabled: false, curveSegments: 12 }).translate(0, 0, -0.45));
+  mesh(hg, std(0xff4fa3), 0, 0.8, 0, g);
+  mesh(boxG(1.9, 0.12, 1.0), std(0xffcc33), 0, 0.06, 0, g);
+  bake(g, [g]);
+  return { root: g, hw: 1.25, hd: 0.55, h: 1.6 };
+}
+function makeLoveBench() {
+  const g = new THREE.Group();
+  mesh(boxG(1.7, 0.3, 0.9), std(0x6b2148), 0, 0.3, 0, g);
+  mesh(boxG(1.75, 0.45, 0.95), std(0xd4338f), 0, 0.68, 0, g);
+  for (const [x, z] of [[-0.75, -0.38], [0.75, -0.38], [-0.75, 0.38], [0.75, 0.38]]) mesh(cylG(0.05, 0.04, 0.16, 6), std(0xffcc33), x, 0.08, z, g);
+  for (const x of [-0.45, 0.45]) mesh(geo('benchHeart', () => new THREE.ExtrudeGeometry(heartShape(0.18), { depth: 0.12, bevelEnabled: false })), std(0xffffff), x, 1.05, 0.1, g);
+  bake(g, [g]);
+  return { root: g, hw: 0.9, hd: 0.5, h: 1.0 };
+}
+function makeTeddy() {
+  const g = new THREE.Group(), fur = std(0xb07a4a), light = std(0xe6c29a);
+  const sph = r => geo('sph' + r, () => new THREE.SphereGeometry(r, 12, 9));
+  mesh(sph(0.55), fur, 0, 0.55, 0, g); mesh(sph(0.32), light, 0, 0.5, 0.3, g);
+  mesh(sph(0.38), fur, 0, 1.12, 0.05, g); mesh(sph(0.15), light, 0, 1.06, 0.38, g);
+  for (const sx of [-1, 1]) { mesh(sph(0.13), fur, sx * 0.28, 1.42, 0, g); mesh(sph(0.2), fur, sx * 0.55, 0.62, 0.15, g); mesh(sph(0.22), fur, sx * 0.32, 0.12, 0.35, g); }
+  mesh(boxG(0.34, 0.12, 0.08), std(0xe0115f), 0, 0.82, 0.36, g);
+  bake(g, [g]);
+  return { root: g, hw: 1.0, hd: 0.7, h: 1.4 };
+}
+function makeRoomService() {
+  const g = new THREE.Group();
+  mesh(boxG(1.4, 0.08, 1.0), std(0xffffff), 0, 0.85, 0, g); mesh(boxG(1.4, 0.06, 1.0), std(0xffffff), 0, 0.3, 0, g);
+  for (const [x, z] of [[-0.65, -0.45], [0.65, -0.45], [-0.65, 0.45], [0.65, 0.45]]) { mesh(boxG(0.05, 0.8, 0.05), std(0xffcc33), x, 0.55, z, g); mesh(geo('sph0.08', () => new THREE.SphereGeometry(0.08, 8, 6)), std(0x222222), x, 0.08, z, g); }
+  mesh(cylG(0.36, 0.36, 0.22, 16), std(0xffffff), -0.2, 1.0, 0, g); mesh(cylG(0.26, 0.26, 0.2, 16), std(0xff8fc8), -0.2, 1.21, 0, g);
+  mesh(cylG(0.07, 0.09, 0.45, 8), std(0x1d5c2e), 0.42, 1.12, 0, g);
+  const candle = mesh(cylG(0.03, 0.03, 0.12, 6), emis(0xffb627, 3), -0.2, 1.38, 0, g, false);
+  bake(g, [g]);
+  return { root: g, hw: 0.85, hd: 0.6, h: 1.4, beaconMesh: candle };
+}
+// Plage
+function makeSandcastle() {
+  const g = new THREE.Group(), sand = std(0xe9c98a), dark = std(0xd2ad6a);
+  mesh(boxG(2.4, 0.6, 1.1), sand, 0, 0.3, 0, g);
+  for (const x of [-0.85, 0, 0.85]) {
+    mesh(cylG(0.3, 0.34, 0.75, 10), x ? sand : dark, x, 0.95, 0, g);
+    mesh(geo('castleCone', () => new THREE.ConeGeometry(0.36, 0.35, 10)), dark, x, 1.5, 0, g);
+  }
+  mesh(boxG(0.02, 0.3, 0.02), std(0x7a5a30), 0, 1.8, 0, g, false); mesh(boxG(0.22, 0.13, 0.02), std(0xff3b3b), 0.11, 1.88, 0, g, false);
+  bake(g, [g]);
+  return { root: g, hw: 1.25, hd: 0.55, h: 1.6 };
+}
+function makeCooler() {
+  const g = new THREE.Group();
+  mesh(boxG(1.6, 0.75, 0.9), std(0x1f8fe0), 0, 0.38, 0, g);
+  mesh(boxG(1.66, 0.22, 0.96), std(0xffffff), 0, 0.86, 0, g);
+  mesh(boxG(0.9, 0.08, 0.1), std(0xffffff), 0, 1.02, 0, g);
+  bake(g, [g]);
+  return { root: g, hw: 0.9, hd: 0.5, h: 1.0 };
+}
+function makeSurfRack() {
+  const g = new THREE.Group();
+  for (const x of [-0.9, 0.9]) mesh(boxG(0.12, 1.4, 0.5), std(0x9b6a35), x, 0.7, 0, g);
+  [0xffc21a, 0xff4fa3, 0x2fd1d1].forEach((c, i) => { const b = mesh(boxG(2.1, 0.09, 0.55), std(c), 0, 0.4 + i * 0.42, 0, g); b.rotation.z = (i - 1) * 0.06; });
+  bake(g, [g]);
+  return { root: g, hw: 1.0, hd: 0.7, h: 1.4 };
+}
+function makeBeachBall() {
+  const g = new THREE.Group();
+  const roll = ball(0.7, [0xff3b3b, 0xffffff, 0x2fa8ff, 0xffffff, 0xffc21a, 0xffffff], g, 0.7);
+  bake(g, [roll]);
+  return { root: g, hw: 0.85, hd: 0.6, h: 1.4, roller: roll };
+}
+// Salle de sport
+function makePlyoStack() {
+  const g = new THREE.Group(), wood = std(0xc9935a), edge = std(0x8a5a2b);
+  mesh(boxG(2.4, 0.8, 1.0), wood, 0, 0.4, 0, g); mesh(boxG(1.4, 0.8, 1.0), wood, 0.3, 1.2, 0, g);
+  for (const y of [0.02, 0.78, 1.58]) mesh(boxG(y > 1 ? 1.42 : 2.42, 0.05, 1.02), edge, y > 1 ? 0.3 : 0, y, 0, g, false);
+  bake(g, [g]);
+  return { root: g, hw: 1.25, hd: 0.55, h: 1.6 };
+}
+function makeBench() {
+  const g = new THREE.Group(), steel = std(0x9aa3b5), black = std(0x15171c);
+  mesh(boxG(1.6, 0.16, 0.5), black, 0, 0.5, 0, g);
+  for (const x of [-0.6, 0.6]) mesh(boxG(0.08, 0.45, 0.4), steel, x, 0.22, 0, g);
+  for (const x of [-0.75, 0.75]) mesh(boxG(0.06, 1.0, 0.06), steel, x, 0.5, -0.3, g);
+  mesh(cylG(0.035, 0.035, 2.1, 6), steel, 0, 0.95, -0.3, g).rotation.z = HALF_PI;
+  for (const x of [-0.95, 0.95]) mesh(cylG(0.3, 0.3, 0.1, 12), std(0xe63946), x, 0.95, -0.3, g).rotation.z = HALF_PI;
+  bake(g, [g]);
+  return { root: g, hw: 0.9, hd: 0.5, h: 1.0 };
+}
+function makeBigDumbbell() {
+  const g = new THREE.Group();
+  mesh(cylG(0.1, 0.1, 2.0, 8), std(0xc8ced8), 0, 0.7, 0, g).rotation.z = HALF_PI;
+  for (const sx of [-1, 1]) {
+    mesh(cylG(0.7, 0.7, 0.24, 16), std(0x15171c), sx * 0.75, 0.7, 0, g).rotation.z = HALF_PI;
+    mesh(cylG(0.55, 0.55, 0.16, 16), std(0xe63946), sx * 0.55, 0.7, 0, g).rotation.z = HALF_PI;
+  }
+  bake(g, [g]);
+  return { root: g, hw: 1.0, hd: 0.7, h: 1.4 };
+}
+function makeGymBall() {
+  const g = new THREE.Group();
+  const roll = ball(0.7, [0x2fa8ff, 0x1f6fe0], g, 0.7);
+  bake(g, [roll]);
+  return { root: g, hw: 0.85, hd: 0.6, h: 1.4, roller: roll };
+}
+// Façades des grands obstacles (baies, armoires, cabines, vestiaires)
+function wardrobeTexture() {
+  const [c, g] = makeCanvas(256, 352);
+  g.fillStyle = '#ff7cc6'; g.fillRect(0, 0, 256, 352);
+  g.fillStyle = '#d4338f'; g.fillRect(0, 0, 256, 14); g.fillRect(0, 338, 256, 14); g.fillRect(124, 0, 8, 352);
+  for (const x of [14, 140]) { g.strokeStyle = '#ffcc33'; g.lineWidth = 6; g.strokeRect(x, 30, 102, 290); }
+  g.fillStyle = '#e8f6ff'; g.beginPath(); g.ellipse(65, 150, 34, 70, 0, 0, 7); g.fill(); g.beginPath(); g.ellipse(191, 150, 34, 70, 0, 0, 7); g.fill();
+  drawHeart(g, 65, 260, 18, '#ffffff'); drawHeart(g, 191, 260, 18, '#ffffff');
+  g.fillStyle = '#ffcc33'; g.fillRect(112, 170, 8, 30); g.fillRect(136, 170, 8, 30);
+  return toTex(c, { repeat: true });
+}
+function cabinTexture() {
+  const [c, g] = makeCanvas(256, 352);
+  const pairs = [['#ff3b6b', '#ffffff'], ['#2fa8ff', '#ffffff'], ['#ffc21a', '#ffffff'], ['#2fd14a', '#ffffff']];
+  for (let k = 0; k < 2; k++) { // deux cabines par façade
+    const [a, b] = pairs[(k * 3 + 1) % 4], x0 = k * 128;
+    for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? b : a; g.fillRect(x0 + i * 16, 0, 16, 352); }
+    g.fillStyle = '#7a4a22'; g.fillRect(x0 + 34, 120, 60, 232);
+    g.fillStyle = '#5a3418'; g.fillRect(x0 + 34, 120, 60, 6);
+    g.fillStyle = '#ffd21f'; g.beginPath(); g.arc(x0 + 84, 240, 5, 0, 7); g.fill();
+    g.fillStyle = '#ffffff'; g.font = 'bold 30px Arial Black, Arial'; g.textAlign = 'center'; g.fillText(String(k + 3), x0 + 64, 90);
+  }
+  return toTex(c, { repeat: true });
+}
+function lockerTexture() {
+  const [c, g] = makeCanvas(256, 352);
+  g.fillStyle = '#4f6d96'; g.fillRect(0, 0, 256, 352);
+  for (let i = 0; i < 3; i++) {
+    const x = 4 + i * 84;
+    g.fillStyle = '#6a8bb8'; g.fillRect(x, 6, 80, 340);
+    g.fillStyle = '#3c5578'; for (let k = 0; k < 6; k++) g.fillRect(x + 16, 26 + k * 10, 48, 4);
+    g.fillStyle = '#d0d6e0'; g.fillRect(x + 60, 170, 8, 34);
+    g.fillStyle = '#ffffff'; g.fillRect(x + 22, 100, 36, 20);
+    g.fillStyle = '#15171c'; g.font = 'bold 16px Arial'; g.textAlign = 'center'; g.fillText(String(12 + i), x + 40, 116);
+  }
+  return toTex(c, { repeat: true });
+}
+const BLOCK_STYLE = {
+  dc:    { body: 0x2a3550, roof: 0x9aa3b5, nose: 0xffc21a, neon: [0x00e5ff, 0xff2bd6], face: () => BLOCK_FRONT(), rep: 3.86 },
+  love:  { body: 0xd4338f, roof: 0xffcc33, nose: 0xffffff, neon: [0xff4fd8, 0xff4fd8], tex: wardrobeTexture, rep: 2.6 },
+  beach: { body: 0xf6e2b0, roof: 0x9b6a35, nose: 0xff3b6b, neon: null, tex: cabinTexture, rep: 2.6 },
+  gym:   { body: 0x3c5578, roof: 0x15171c, nose: 0xe63946, neon: null, tex: lockerTexture, rep: 2.6 },
+};
+const _faceMats = {};
+function blockFace(th) {
+  const st = BLOCK_STYLE[th];
+  if (st.face) return st.face();
+  return _faceMats[th] || (_faceMats[th] = toonMap(st.tex()));
+}
+const RAMP_STYLE = { dc: [0xffc21a, 0x1d2740], love: [0xff8fc8, 0xffcc33], beach: [0xc99a5b, 0x7a4a22], gym: [0x2b2f36, 0xffc21a] };
+const THEMED_OBS = {
+  dc:    { server: makeServer, ups: makeUps, spool: makeSpool, cart: makeCart },
+  love:  { server: makeHeartPouf, ups: makeLoveBench, spool: makeTeddy, cart: makeRoomService },
+  beach: { server: makeSandcastle, ups: makeCooler, spool: makeSurfRack, cart: makeBeachBall },
+  gym:   { server: makePlyoStack, ups: makeBench, spool: makeBigDumbbell, cart: makeGymBall },
+};
+const HIT_TEXT = {
+  dc:    { server: 'Collision avec une baie PowerEdge !', ups: 'Bing ! Dans l\'onduleur !', spool: 'Pris dans le touret de câble !', cart: 'Renversé par le chariot !', block: 'Dans le mur de baies ! Monte par la rampe !' },
+  love:  { server: 'Écrasé par le pouf cœur !', ups: 'Trébuché sur la banquette !', spool: 'Câlin forcé du nounours !', cart: 'Renversé par le room service !', block: 'Dans l\'armoire ! Monte par la rampe !' },
+  beach: { server: 'Tu as détruit le château de sable !', ups: 'Pied dans la glacière !', spool: 'Bonk ! Les planches de surf !', cart: 'Écrasé par le ballon de plage !', block: 'Dans les cabines ! Monte par la rampe !' },
+  gym:   { server: 'Dans les box de pliométrie !', ups: 'Trébuché sur le banc de muscu !', spool: 'L\'haltère géant !', cart: 'Percuté par le swiss ball !', block: 'Dans les vestiaires ! Monte par la rampe !' },
+};
+
 // Cadeau très rare : donne un bonus d'inventaire au hasard
 function makeGift() {
   if (!PICK.gift) {
@@ -1993,21 +2198,28 @@ function updateParticles(dt, worldD) {
    PROGRESSION : cagnotte de points, inventaire, skins et décors achetés
    ===================================================================== */
 const ITEMS = {
-  life:   { name: 'Vie en plus',  icon: '❤️', desc: '+1 ❤️ quand tu l\'actives', price: 2500 },
-  x2:     { name: 'Points x2',    icon: '✖️2', desc: 'Score doublé pendant 30 s', price: 2000 },
-  shield: { name: 'Bouclier',     icon: '🛡️', desc: 'Invincible 15 s, tu dégommes tout', price: 3000 },
-  magnet: { name: 'Aimant',       icon: '🧲', desc: 'Attire les bonus pendant 20 s', price: 1500 },
+  life:   { name: 'Vie en plus',  icon: '❤️', desc: '+1 ❤️ quand tu l\'actives', price: 400 },
+  x2:     { name: 'Points x2',    icon: '✖️2', desc: 'Score doublé pendant 30 s', price: 300 },
+  shield: { name: 'Bouclier',     icon: '🛡️', desc: 'Invincible 15 s, tu dégommes tout', price: 500 },
+  magnet: { name: 'Aimant',       icon: '🧲', desc: 'Attire les bonus pendant 20 s', price: 250 },
 };
+const COIN_RATE = 10; // points de score par pièce gagnée
 const MAPS = {
   dc:    { price: 0 },
-  love:  { price: 20000 },
-  beach: { price: 30000 },
-  gym:   { price: 25000 },
+  love:  { price: 6000 },
+  beach: { price: 10000 },
+  gym:   { price: 8000 },
 };
 const Prog = (() => {
-  const def = { bank: 0, inv: { life: 0, x2: 0, shield: 0, magnet: 0 }, skins: ['tech'], skin: 'tech', maps: ['dc'], map: 'dc' };
+  const def = { eco: 2, bank: 0, inv: { life: 0, x2: 0, shield: 0, magnet: 0 }, skins: ['tech'], skin: 'tech', maps: ['dc'], map: 'dc' };
   let s = def;
-  try { const raw = localStorage.getItem('ddz_save'); if (raw) s = { ...def, ...JSON.parse(raw), inv: { ...def.inv, ...(JSON.parse(raw).inv || {}) } }; } catch (e) {}
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem('ddz_save')); } catch (e) {}
+  if (raw) {
+    s = { ...def, ...raw, inv: { ...def.inv, ...(raw.inv || {}) } };
+    // v2.1 : la cagnotte rapporte 1 💰 pour 10 points ; une cagnotte de la v2.0 est convertie une seule fois
+    if (!raw.eco) { s.bank = Math.floor((raw.bank || 0) / 10); s.eco = 2; }
+  }
   return s;
 })();
 function saveProg() { try { localStorage.setItem('ddz_save', JSON.stringify(Prog)); } catch (e) {} }
@@ -2015,19 +2227,21 @@ function saveProg() { try { localStorage.setItem('ddz_save', JSON.stringify(Prog
 /* =====================================================================
    ENTITÉS (pool d'objets recyclés)
    ===================================================================== */
+const THEMED = new Set(['server', 'ups', 'spool', 'cart', 'block8', 'block12', 'block16', 'ramp']);
 const MAKERS = {
-  server: makeServer, ups: makeUps, spool: makeSpool, cart: makeCart,
+  server: th => THEMED_OBS[th].server(), ups: th => THEMED_OBS[th].ups(), spool: th => THEMED_OBS[th].spool(), cart: th => THEMED_OBS[th].cart(),
   block8: blockMaker(8), block12: blockMaker(12), block16: blockMaker(16), ramp: makeRamp,
   boss: makeBoss, cop: makeCop, girl: makeGirl, leaf: makeLeaf, beer: makeBeer, gift: makeGift, portal: makePortal,
 };
 const SCALE = { boss: 1.18, cop: 1.18, girl: 1.12, leaf: 1.4, beer: 1.35, gift: 1.1 };
 const KIND = { girl: 'girl', leaf: 'pickup', beer: 'pickup', gift: 'pickup', ramp: 'ramp', portal: 'portal' };
-const POOL = {}; for (const k in MAKERS) POOL[k] = [];
+const POOL = {};
 const ENTS = [];
 function spawn(type, lane, z, y = 0) {
-  const e = POOL[type].pop() || { type, ...MAKERS[type]() };
+  const th = THEMED.has(type) ? WORLD.cur.id : '', key = th ? type + '@' + th : type; // modèle selon le décor
+  const e = (POOL[key] || (POOL[key] = [])).pop() || { type, key, theme: th, ...MAKERS[type](th) };
   e.kind = KIND[type] || 'obstacle'; e.lane = lane; e.x = lane === null ? 0 : LANES[lane]; e.z = z; e.y = y; e.baseY = y;
-  e.hit = false; e.fly = null; e.pop = 0; e.t = rand(10); e.dead = false;
+  e.hit = false; e.fly = null; e.pop = 0; e.t = rand(10); e.dead = false; e.ramped = false;
   e.root.position.set(e.x, y, z); e.root.visible = true;
   e.root.rotation.set(0, (e.type === 'boss' || e.type === 'cop' || e.type === 'girl') ? Math.PI : 0, 0);
   e.root.scale.setScalar(SCALE[type] || 1);
@@ -2037,7 +2251,7 @@ function spawn(type, lane, z, y = 0) {
 }
 function recycle(e) {
   e.dead = true; e.root.visible = false;
-  POOL[e.type].push(e);
+  POOL[e.key].push(e);
 }
 function clearEntities() { for (const e of ENTS) recycle(e); ENTS.length = 0; }
 const alive = type => ENTS.reduce((n, e) => n + (e.type === type && !e.dead ? 1 : 0), 0);
@@ -2049,7 +2263,7 @@ const G = {
   state: 'menu', time: 0, runTime: 0, score: 0, lives: CFG.startLives, fuzz: 0, high: false,
   speedMul: 1, curMul: 1, maxMul: 1, speed: 0, dist: 0, nextRow: 0, girlTimer: 20, portalTimer: 50, lastGift: -99,
   invuln: 0, turbo: 0, shake: 0, resume: 1, dying: 0,
-  x2: 0, shield: 0, magnet: 0, neon: 0, neonAmt: 0, leaves: 0,
+  x2: 0, shield: 0, magnet: 0, neon: 0, neonAmt: 0, leaves: 0, alc: 0,
   items: 0, girls: 0, cops: 0, best: Save.get(), tripAmt: 0,
 };
 const P = { x: 0, lane: 1, y: 0, vy: 0, air: false, jumpBuf: 0, hum: null };
@@ -2089,7 +2303,7 @@ function spawnRow(z) {
       const withRamp = (i === n - 1 && n === 3 && !ramped) || Math.random() < 0.45;
       let zn = z;
       if (withRamp) { spawn('ramp', l, z - 3); zn = z - 6; ramped = true; }
-      spawn('block' + L, l, zn - L / 2);
+      spawn('block' + L, l, zn - L / 2).ramped = withRamp;
       if (Math.random() < 0.55) pickupLine(l, zn - 2, 4.6, 2 + ((Math.random() * 2) | 0), 3, Math.random() < 0.35 ? 'leaf' : 'beer'); // bonus sur le toit
       extra = Math.max(extra, z - (zn - L));
     }
@@ -2114,7 +2328,9 @@ function groundAt(x, y, step) {
     const near = e.z + e.hd, far = e.z - e.hd;
     if (near < -0.3 || far > 0.3) continue;
     const h = e.ramp ? e.h * clamp(near / (2 * e.hd), 0, 1) : e.h;
-    if (h <= y + step && h > g) g = h;
+    // grande marche seulement pour suivre une rampe ; une baie sans rampe ne s'escalade pas en sautant
+    const lim = e.ramp || e.ramped ? step : 0.3;
+    if (h <= y + lim && h > g) g = h;
   }
   return g;
 }
@@ -2264,6 +2480,9 @@ function collisions() {
     } else if (e.kind === 'obstacle') {
       const clear = e.surf ? P.y >= e.h - 0.45 : P.y >= e.h * 0.8;   // sur le toit / par-dessus
       if (clear) continue;
+      // Baie précédée d'une rampe : arrivée par l'avant (même en sautant par-dessus la rampe) = posé sur
+      // le toit. Seule une entrée par le flanc (changement de voie) reste un choc.
+      if (e.surf && e.ramped && (P.y >= e.h - 1.6 || e.z + e.hd < 1.6)) { P.y = e.h; if (P.vy <= 0) { P.vy = 0; P.air = false; } continue; }
       e.hit = true;
       const invincible = G.turbo > 0 || G.shield > 0;
       if (invincible) { if (!e.surf) knock(e); }
@@ -2284,7 +2503,8 @@ function collect(e) {
   }
   const isLeaf = e.type === 'leaf';
   const wasHigh = G.high;
-  G.fuzz = Math.min(100, G.fuzz + (isLeaf ? 22 : 18));
+  const add = Math.min(100 - G.fuzz, isLeaf ? 22 : 18);
+  G.fuzz += add; if (!isLeaf) G.alc += add;   // G.alc = part de l'alcool dans la jauge
   G.items++;
   const pts = (isLeaf ? 200 : 100) * scoreMul();
   G.score += pts;
@@ -2305,20 +2525,17 @@ function setHigh(on) {
   G.high = on;
   if (on) { banner('🌀 DÉFONCE ACTIVE · score x2 · gare aux flics !', 'green', 2.4); Snd.play('high'); setTimeout(() => G.high && Snd.play('siren'), 700); }
 }
-const HIT_TEXT = {
-  boss: '⚠️ Recadré par le Chef Admin Réseau ! −1 ❤️', ups: '⚠️ Bing ! Dans l\'onduleur ! −1 ❤️', spool: '⚠️ Pris dans le touret de câble ! −1 ❤️',
-  cart: '⚠️ Renversé par le chariot ! −1 ❤️', server: '⚠️ Collision avec une baie PowerEdge ! −1 ❤️',
-};
 function hitBy(e) {
   G.shake = 0.5;
   if (e.type === 'cop') {
     G.lives -= 2; G.cops++; G.invuln = 1.6;
-    G.fuzz = 0; setHigh(false);
+    G.fuzz = 0; G.alc = 0; setHigh(false);
     banner('🚨 RETRAIT DE PERMIS ! −2 ❤️', 'cop', 2.2); flash('cop'); Snd.play('cop');
     popup('−2 ❤️', P.x, 2.4, 0, '#ff3b5c');
   } else {
     G.lives -= 1; G.invuln = 1.4;
-    banner(e.surf ? '⚠️ Dans le mur de baies ! Monte par la rampe ! −1 ❤️' : (HIT_TEXT[e.type] || HIT_TEXT.server), 'red', 1.8);
+    const txt = e.type === 'boss' ? 'Recadré par le Chef Admin Réseau !' : HIT_TEXT[e.theme || 'dc'][e.surf ? 'block' : e.type] || HIT_TEXT.dc.server;
+    banner('⚠️ ' + txt + ' −1 ❤️', 'red', 1.8);
     flash('hit'); Snd.play('hit');
     popup('−1 ❤️', P.x, P.y + 2.4, 0, '#ff3b5c');
   }
@@ -2356,14 +2573,20 @@ function teleport() {
 /* =====================================================================
    MINI-JEU DE SÉDUCTION
    ===================================================================== */
-const MG = { el: $('mini'), zone: $('mini-zone'), cursor: $('mini-cursor'), bar: $('mini-bar'), steps: $('mini-steps'), tries: $('mini-tries'), msg: $('mini-msg') };
+const MG = { mod: $('mini-mod'), el: $('mini'), zone: $('mini-zone'), cursor: $('mini-cursor'), bar: $('mini-bar'), steps: $('mini-steps'), tries: $('mini-tries'), msg: $('mini-msg') };
 let mini = null;
 function startMini(girl) {
   G.state = 'mini';
   P.air = false; P.y = 0; P.vy = 0;
   girl.z = -1.7; girl.x = P.x;
   girl.root.position.set(girl.x, 0, girl.z);
-  mini = { girl, pos: 0, dir: 1, speed: 0.95, succ: 0, miss: 0, zoneW: 0.3, zoneX: 0.35, lock: 0.35, end: null };
+  // Cannabis à fond : détendu (zone plus large, curseur plus lent). Alcool : ça tangue (zone étroite, curseur rapide qui vacille).
+  const thc = clamp((G.fuzz - G.alc) / 100, 0, 1), alc = clamp(G.alc / 100, 0, 1);
+  const zoneW = clamp(0.3 * (1 + 0.9 * thc) * (1 - 0.45 * alc), 0.14, 0.5);
+  mini = { girl, pos: 0, eff: 0, dir: 1, speed: 0.95 * (1 - 0.35 * thc) * (1 + 0.5 * alc), wob: 0.07 * alc,
+    succ: 0, miss: 0, zoneW, zoneX: 0.5 - zoneW / 2, lock: 0.35, end: null };
+  MG.mod.textContent = thc > 0.25 && thc >= alc ? '🌿 Détendu : la zone est plus large, le curseur plus lent'
+    : alc > 0.25 ? '🍺 Pompette : ça tangue, la zone est plus étroite…' : '';
   MG.steps.innerHTML = '<i></i>'.repeat(5);
   MG.msg.textContent = ''; MG.msg.style.color = '';
   renderMini();
@@ -2379,7 +2602,7 @@ function renderMini() {
 }
 function miniPress() {
   if (!mini || mini.lock > 0 || mini.end) return;
-  const inZone = mini.pos >= mini.zoneX && mini.pos <= mini.zoneX + mini.zoneW;
+  const inZone = mini.eff >= mini.zoneX && mini.eff <= mini.zoneX + mini.zoneW;
   MG.bar.classList.remove('good', 'bad'); void MG.bar.offsetWidth;
   if (inZone) {
     mini.succ++;
@@ -2444,7 +2667,8 @@ function updateMini(dt) {
     mini.pos += mini.dir * mini.speed * dt;
     if (mini.pos > 1) { mini.pos = 1; mini.dir = -1; }
     if (mini.pos < 0) { mini.pos = 0; mini.dir = 1; }
-    MG.cursor.style.left = (mini.pos * 100) + '%';
+    mini.eff = clamp(mini.pos + Math.sin(G.time * 9) * mini.wob + Math.sin(G.time * 23) * mini.wob * 0.4, 0, 1); // vacille sous l'alcool
+    MG.cursor.style.left = (mini.eff * 100) + '%';
   }
   if (mini.lock > 0) { mini.lock -= dt; if (mini.lock <= 0 && mini.end) finishMini(); }
 }
@@ -2476,7 +2700,7 @@ function resetRun() {
   clearEntities();
   Object.assign(G, { runTime: 0, score: 0, lives: CFG.startLives, fuzz: 0, high: false, speedMul: 1, curMul: 1, maxMul: 1, dist: 0,
     invuln: 0, turbo: 0, shake: 0, resume: 1, dying: 0, items: 0, girls: 0, cops: 0, girlTimer: rand(14, 20),
-    portalTimer: rand(40, 55), lastGift: -99, x2: 0, shield: 0, magnet: 0, neon: 0, leaves: 0 });
+    portalTimer: rand(40, 55), lastGift: -99, alc: 0, x2: 0, shield: 0, magnet: 0, neon: 0, leaves: 0 });
   Object.assign(P, { x: 0, lane: 1, y: 0, vy: 0, air: false, jumpBuf: 0 });
   P.hum.root.rotation.set(0, 0, 0); P.hum.root.position.set(0, 0, 0); P.hum.root.visible = true;
   lastHud = {};
@@ -2500,13 +2724,14 @@ function gameOver() {
   G.state = 'over';
   const final = Math.floor(G.score), rec = final > G.best;
   if (rec) { G.best = final; Save.set(final); }
-  Prog.bank += final; saveProg();   // le score de la partie alimente la cagnotte de la boutique
+  const coins = Math.floor(final / COIN_RATE);
+  Prog.bank += coins; saveProg();   // la partie alimente la cagnotte : 1 💰 pour 10 points
   $('o-score').textContent = final.toLocaleString('fr-FR');
   $('o-speed').textContent = 'x' + G.maxMul.toFixed(2);
   $('o-best').textContent = G.best.toLocaleString('fr-FR');
   $('o-dist').textContent = Math.floor(G.dist).toLocaleString('fr-FR') + ' m';
   $('o-items').textContent = G.items; $('o-girls').textContent = G.girls; $('o-cops').textContent = G.cops;
-  $('o-bank').textContent = `+${final.toLocaleString('fr-FR')} 💰 · cagnotte : ${Prog.bank.toLocaleString('fr-FR')}`;
+  $('o-bank').textContent = `+${coins.toLocaleString('fr-FR')} 💰 · cagnotte : ${Prog.bank.toLocaleString('fr-FR')}`;
   $('newrec').classList.toggle('hidden', !rec);
   refreshMenu();
   $('s-over').classList.remove('hidden');
@@ -2520,7 +2745,7 @@ function refreshMenu() {
 function toMenu() {
   clearEntities();
   if (mini) { MG.el.classList.add('hidden'); mini = null; }
-  Object.assign(G, { state: 'menu', fuzz: 0, high: false, turbo: 0, neon: 0, x2: 0, shield: 0, magnet: 0 });
+  Object.assign(G, { state: 'menu', fuzz: 0, alc: 0, high: false, turbo: 0, neon: 0, x2: 0, shield: 0, magnet: 0 });
   Object.assign(P, { x: 0, lane: 1, y: 0, vy: 0, air: false });
   P.hum.root.rotation.set(0, 0, 0); P.hum.root.visible = true; SHIELD.visible = false;
   setTheme(Prog.map);
@@ -2606,21 +2831,24 @@ function updateRun(dt) {
   for (const k of ['turbo', 'x2', 'shield', 'magnet', 'neon']) if (G[k] > 0) G[k] = Math.max(0, G[k] - dt);
   G.invuln -= dt;
   G.girlTimer -= dt; G.portalTimer -= dt;
-  G.fuzz = Math.max(0, G.fuzz - CFG.fuzzDecay * dt);
+  const f0 = G.fuzz; G.fuzz = Math.max(0, G.fuzz - CFG.fuzzDecay * dt);
+  G.alc = f0 > 0 ? G.alc * (G.fuzz / f0) : 0;   // les deux parts redescendent ensemble
   if (G.high && G.fuzz < CFG.fuzzThreshold) setHigh(false);
   if (!G.dying) G.score += d * scoreMul();
   // Nouvelles rangées (écarts variables, + longueur des trains de baies)
   G.nextRow -= d;
   if (G.nextRow <= 0) G.nextRow += rowGap(speed) + spawnRow(CFG.spawnZ);
+  // Les obstacles avancent AVANT le calcul de la hauteur du joueur : sinon, sur mobile (30 i/s),
+  // le joueur restait une image en retard en haut des rampes et percutait la baie.
+  updateEntities(dt, d);
   if (G.dying > 0) {
     const h = P.hum;
     h.root.visible = true;
     h.root.rotation.x = damp(h.root.rotation.x, -1.35, 5, dt);
     P.y = Math.max(0, P.y - dt * 6); h.root.position.y = P.y;
   } else updatePlayer(dt, speed);
-  updateEntities(dt, d);
   if (!G.dying) collisions();
-  Snd.bpm = Math.min(152, 120 + (G.curMul - 1) * 16);
+  Snd.bpm = Math.min(146, 128 + (G.curMul - 1) * 10);
 }
 function updateEntities(dt, d) {
   let nearestCop = null;
@@ -2633,6 +2861,7 @@ function updateEntities(dt, d) {
     if (!e.hit && e.z > -32 && (e.type === 'boss' || e.type === 'cop')) extra = e.type === 'cop' ? 2.6 : 2.0;
     if (!e.hit && e.type === 'cart' && e.z > -45) extra = 7;
     e.z += d + extra * dt * running;
+    if (e.roller) e.roller.rotation.x -= (d + extra * dt * running) / 0.7; // le ballon roule
     if (e.fly) {
       e.fly.vy -= 30 * dt;
       e.x += e.fly.vx * dt; e.y += e.fly.vy * dt; e.z += e.fly.vz * dt;
@@ -2900,9 +3129,10 @@ updateLeds();
 requestAnimationFrame(frame);
 
 // Accès de test / debug depuis la console
-window.DDZ = { G, P, ENTS, CFG, QUALITY, renderer, Prog, WORLD, spawn, useItem, teleport, setTheme, setSkin, saveProg, startGame, toMenu, miniPress, get mini() { return mini; },
+window.DDZ = { G, P, ENTS, CFG, QUALITY, renderer, Snd, Prog, WORLD, spawn, useItem, teleport, setTheme, setSkin, saveProg, startGame, toMenu, miniPress, get mini() { return mini; },
   pause() { setPaused(true); },   // utilisé par le bouton Retour de l'APK Android
-  setFuzz(v) { G.fuzz = v; if (v >= CFG.fuzzThreshold) setHigh(true); } };
+  step(dt) { updateRun(dt); },     // tests : avance la course d'un pas fixe
+  setFuzz(v, alc = 0) { G.fuzz = v; G.alc = alc; if (v >= CFG.fuzzThreshold) setHigh(true); } };
 </script>
 <script>
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
